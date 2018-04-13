@@ -12,12 +12,14 @@ node {
 
   stage('Build project') {
     app.inside {
-      sh 'mv /opt/OpenKinect-for-Processing/OpenKinect-Processing ~'
-      sh 'mv /opt/processing-3.3.7 ~'
-      sh 'mkdir -p ~/sketchbook/library/'
-      sh 'cd /opt/OpenKinect-for-Processing && ant -Dsketchbook.location=~/sketchbook -Dclasspath.local.location=~/processing-3.3.7/core/library/ -Dis.normal=true'
-      sh 'mv ~/OpenKinect-Processing/distribution/openkinect_processing-5/download/openkinect_processing.zip ~'
-      archiveArtifacts artifacts: 'openkinect_processing.zip'
+      withEnv(["HOME=${ pwd() }"]) { 
+        sh 'mv /opt/OpenKinect-for-Processing/OpenKinect-Processing ~'
+        sh 'mv /opt/processing-3.3.7 ~'
+        sh 'mkdir -p ~/sketchbook/library/'
+        sh 'cd /opt/OpenKinect-for-Processing && ant -Dsketchbook.location=~/sketchbook -Dclasspath.local.location=~/processing-3.3.7/core/library/ -Dis.normal=true'
+        sh 'mv ~/OpenKinect-Processing/distribution/openkinect_processing-5/download/openkinect_processing.zip ~'
+        archiveArtifacts artifacts: 'openkinect_processing.zip'
+      }
     }
   }
 }
