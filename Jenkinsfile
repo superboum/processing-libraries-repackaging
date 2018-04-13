@@ -15,6 +15,8 @@ node {
       withEnv(["HOME=${ pwd() }"]) { 
         sh 'mv /opt/OpenKinect-for-Processing/OpenKinect-Processing ~'
         sh 'mv /opt/processing-3.3.7 ~'
+        sh 'ls'
+        sh 'ls ~'
         sh 'mkdir -p ~/sketchbook/library/'
         sh 'cd ~/OpenKinect-for-Processing/resources && ant -Dsketchbook.location=~/sketchbook -Dclasspath.local.location=~/processing-3.3.7/core/library/ -Dis.normal=true'
         sh 'mv ~/OpenKinect-Processing/distribution/openkinect_processing-5/download/openkinect_processing.zip ~'
