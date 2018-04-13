@@ -12,11 +12,11 @@ node {
 
   stage('Build project') {
     app.inside {
-      dir('/root/OpenKinect-for-Processing/OpenKinect-Processing/resources') {
-        sh 'mkdir -p /root/sketchbook/library/'
-        sh 'ant -Dsketchbook.location=/root/sketchbook -Dclasspath.local.location=/root/processing-3.3.7/core/library/ -Dis.normal=true'
+      dir('/opt/OpenKinect-for-Processing/OpenKinect-Processing/resources') {
+        sh 'mkdir -p /opt/sketchbook/library/'
+        sh 'ant -Dsketchbook.location=/opt/sketchbook -Dclasspath.local.location=/opt/processing-3.3.7/core/library/ -Dis.normal=true'
       }
-      dir('/root/OpenKinect-for-Processing/OpenKinect-Processing/distribution/openkinect_processing-5/download/') {
+      dir('/opt/OpenKinect-for-Processing/OpenKinect-Processing/distribution/openkinect_processing-5/download/') {
         archiveArtifacts artifacts: 'openkinect_processing.zip'
       }
     }
