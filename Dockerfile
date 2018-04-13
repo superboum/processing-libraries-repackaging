@@ -15,4 +15,4 @@ RUN git clone https://github.com/shiffman/OpenKinect-for-Processing
 RUN curl -L -o processing.tgz http://download.processing.org/processing-3.3.7-linux64.tgz \
     && tar xf processing.tgz
 # creates /root/processing-3.3.7
-RUN chmod 766 -R /opt
+RUN chmod 777 -R /opt
