@@ -1,10 +1,10 @@
 # Processing libraries re-packaging
 
-[![Build Status](https://ci.deuxfleurs.fr/buildStatus/icon?job=Packaging Processing/master)](https://ci.deuxfleurs.fr/job/Packaging Processing/master)
+[![Build Status](https://ci.deuxfleurs.fr/buildStatus/icon?job=processing-repackaging/master)](https://ci.deuxfleurs.fr/job/processing-repackaging/job/master/)
 
 ## OpenKinect for Processing
 
-[download openkinect_processing.zip](https://ci.deuxfleurs.fr/job/Packaging%20Processing/job/master/lastSuccessfulBuild/artifact/openkinect_processing.zip) - instructions can be found below.
+[download openkinect_processing.zip](https://ci.deuxfleurs.fr/job/processing-repackaging/job/master/lastSuccessfulBuild/artifact/openkinect_processing.zip) - instructions can be found below.
 
 I was unable to find a compiled version of *OpenKinect for Processsing* neither in Processing library manager nor in their Github repository releases.
 Furthermore, the provided version doesn't allow users to choose the OpenCL device used to accelerate computation for Kinect v2 devices.
@@ -23,7 +23,7 @@ Now, download the processing library:
 
 ```
 cd ~/sketchbook/libraries
-wget https://ci.deuxfleurs.fr/job/Packaging%20Processing/job/master/lastSuccessfulBuild/artifact/openkinect_processing.zip
+https://ci.deuxfleurs.fr/job/processing-repackaging/job/master/lastSuccessfulBuild/artifact/openkinect_processing.zip
 unzip openkinet_processing.zip
 ```
 
@@ -55,4 +55,4 @@ void draw() {
 
 ### Patches
 
- * Add `Kinect2.initDevice(int index, int cl_index)` method
+ * Add `Kinect2.initDevice(int index, int cl_index)` method as sometimes the first selected device doesn't work (in our case a nvidia graphic card on a laptop with optimus).
