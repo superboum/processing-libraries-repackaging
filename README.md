@@ -2,12 +2,17 @@
 
 [![Build Status](https://ci.deuxfleurs.fr/buildStatus/icon?job=processing-repackaging/master)](https://ci.deuxfleurs.fr/job/processing-repackaging/job/master/)
 
+Currently I only re-packaged OpenKinect for Processing.
+
 ## OpenKinect for Processing
 
 [download openkinect_processing.zip](https://ci.deuxfleurs.fr/job/processing-repackaging/job/master/lastSuccessfulBuild/artifact/openkinect_processing.zip) - instructions can be found below.
 
-I was unable to find a compiled version of *OpenKinect for Processsing* neither in Processing library manager nor in their Github repository releases.
+I was unable to find a compiled version of *OpenKinect for Processsing* that works on Linux, neither in Processing library manager nor in their Github repository releases: this is why I created this repository and a Jenkins job to build it.
+
 Furthermore, the provided version doesn't allow users to choose the OpenCL device used to accelerate computation for Kinect v2 devices.
+So we add a new method to select the OpenCL device as sometimes the automatically choosen device doesn't work (in our case a nvidia graphic card on a Dell Inspiron 7537 laptop with optimus).
+
 Instructions are written for Fedora 27. You might need to adapt them to your distribution.
 
 ### Install OpenKinect on Fedora 27
@@ -55,4 +60,9 @@ void draw() {
 
 ### Patches
 
- * Add `Kinect2.initDevice(int index, int cl_index)` method as sometimes the first selected device doesn't work (in our case a nvidia graphic card on a laptop with optimus).
+ * Add `Kinect2.initDevice(int index, int cl_index)` method.
+
+### Links
+
+  * [OpenKinect for Processing](https://github.com/shiffman/OpenKinect-for-Processing/)
+  * [libfreenect2](https://github.com/OpenKinect/libfreenect2)
