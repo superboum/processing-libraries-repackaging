@@ -52,7 +52,7 @@ void setup() {
 void draw() {
   background(0);
   PImage img = kinect2.getDepthImage();
-  image(img,0,0); //et on l'affiche youpi
+  image(img,0,0);
 }
 ```
 
