@@ -1,0 +1,70 @@
+diff -x .git -Naur libfreenect2-patch/src/JNILibfreenect2.cpp libfreenect2-patch2/src/JNILibfreenect2.cpp
+--- libfreenect2-patch/src/JNILibfreenect2.cpp	2018-04-14 10:03:26.670445713 +0000
++++ libfreenect2-patch2/src/JNILibfreenect2.cpp	2018-04-14 10:08:29.004532942 +0000
+@@ -71,7 +71,7 @@
+     }
+     
+     //open the kinect
+-    void Device::openKinect(int index)
++    void Device::openKinect(int index, int cl_index)
+     {
+         if(mNumDevices == 0)
+         {
+@@ -81,7 +81,7 @@
+         }
+         
+         if(!pipeline){
+-            pipeline = new libfreenect2::OpenCLPacketPipeline();
++            pipeline = new libfreenect2::OpenCLPacketPipeline(cl_index);
+              initialized_device = true;
+         }else{
+             std::cerr << "OpenCL pipeline is not supported!" << std::endl;
+diff -x .git -Naur libfreenect2-patch/src/JNILibfreenect2.h libfreenect2-patch2/src/JNILibfreenect2.h
+--- libfreenect2-patch/src/JNILibfreenect2.h	2018-04-14 10:03:26.670445713 +0000
++++ libfreenect2-patch2/src/JNILibfreenect2.h	2018-04-14 10:08:49.651538899 +0000
+@@ -47,7 +47,7 @@
+         
+         
+         //open a Device from a specific Serial Number
+-        void        openKinect(int index = 0);
++        void        openKinect(int index = 0, int cl_index = -1);
+         
+         void        enumerateDevices();
+         
+diff -x .git -Naur libfreenect2-patch/src/org_openkinect_freenect2_Device.cpp libfreenect2-patch2/src/org_openkinect_freenect2_Device.cpp
+--- libfreenect2-patch/src/org_openkinect_freenect2_Device.cpp	2018-04-14 10:03:26.670445713 +0000
++++ libfreenect2-patch2/src/org_openkinect_freenect2_Device.cpp	2018-04-14 10:09:46.785555383 +0000
+@@ -33,6 +33,15 @@
+     env->DeleteLocalRef(cls);
+ }
+ 
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniOpenN(JNIEnv* env, jobject obj, jint index, jint cl_index)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    kinect->openKinect((int)index, (int) cl_index);
++    env->DeleteLocalRef(cls);
++}
++
+ JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniStop(JNIEnv* env, jobject obj)
+ {
+     jclass cls = env->GetObjectClass(obj);
+diff -x .git -Naur libfreenect2-patch/src/org_openkinect_freenect2_Device.h libfreenect2-patch2/src/org_openkinect_freenect2_Device.h
+--- libfreenect2-patch/src/org_openkinect_freenect2_Device.h	2018-04-14 10:03:26.670445713 +0000
++++ libfreenect2-patch2/src/org_openkinect_freenect2_Device.h	2018-04-14 10:10:41.102571055 +0000
+@@ -30,6 +30,14 @@
+  */
+ JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniOpenM
+ (JNIEnv *, jobject, jint index);
++
++/*
++ * Class:     openv2_Device
++ * Method:    openJNI
++ * Signature: ()V
++ */
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniOpenN
++(JNIEnv *, jobject, jint index, jint cl_index);
+     
+ /*
+  * Class:     org_openkinect_freenect2_Device

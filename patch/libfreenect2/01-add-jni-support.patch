@@ -1,0 +1,1157 @@
+diff -x .git -Naur libfreenect2/CMakeLists.txt libfreenect2-patch/CMakeLists.txt
+--- libfreenect2/CMakeLists.txt	2018-04-14 09:25:54.000000000 +0000
++++ libfreenect2-patch/CMakeLists.txt	2018-04-14 10:03:14.183442110 +0000
+@@ -5,6 +5,21 @@
+ SET(PROJECT_VER_PATCH 0)
+ SET(PROJECT_VER "${PROJECT_VER_MAJOR}.${PROJECT_VER_MINOR}.${PROJECT_VER_PATCH}")
+ SET(PROJECT_APIVER "${PROJECT_VER_MAJOR}.${PROJECT_VER_MINOR}")
++SET(JAVA_JVM_LIBRARY "$ENV{JAVA_HOME}/include")
++SET(JAVA_AWT_LIBRARY "$ENV{JAVA_HOME}/include")
++
++
++find_package(JNI REQUIRED)
++
++if (JNI_FOUND)
++    message (STATUS "JNI_INCLUDE_DIRS=${JNI_INCLUDE_DIRS}")
++    message (STATUS "JNI_LIBRARIES=${JNI_LIBRARIES}")
++    include_directories(${JNI_INCLUDE_DIRS})
++else()
++ message (STATUS "NOOOOOOOO JNI_LIBRARIES=${JNI_LIBRARIES}")
++endif()
++
++set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
+ 
+ if(WIN32 AND NOT MINGW)
+   if(NOT DEFINED CMAKE_DEBUG_POSTFIX)
+@@ -37,6 +52,9 @@
+ OPTION(ENABLE_VAAPI "Enable VA-API support" ON)
+ OPTION(ENABLE_TEGRAJPEG "Enable Tegra HW JPEG support" ON)
+ OPTION(ENABLE_PROFILING "Collect profiling stats (memory consuming)" OFF)
++IF(WIN32)
++  OPTION(LIBUSB_USE_USBDK "Use Usbdk backend for libusb (or libusbK if OFF)" ON)
++ENDIF()
+ 
+ IF(ENABLE_PROFILING)
+   SET(LIBFREENECT2_WITH_PROFILING 1)
+@@ -52,6 +70,13 @@
+   SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
+ ENDIF()
+ 
++
++
++set(CMAKE_CXX_STANDARD 11) # C++11...
++set(CMAKE_CXX_STANDARD_REQUIRED ON) #...is required...
++set(CMAKE_CXX_EXTENSIONS OFF) #...without compiler extensions like gnu++11
++
++
+ SET(HAVE_CXX11 disabled)
+ IF(ENABLE_CXX11)
+   INCLUDE(CheckCXXCompilerFlag)
+@@ -131,6 +156,8 @@
+   src/event_loop.cpp
+   src/usb_control.cpp
+   src/allocator.cpp
++  src/JNILibfreenect2.cpp
++  src/org_openkinect_freenect2_Device
+   src/frame_listener_impl.cpp
+   src/packet_pipeline.cpp
+   src/rgb_packet_stream_parser.cpp
+@@ -410,6 +437,7 @@
+ GENERATE_RESOURCES(${RESOURCES_INC_FILE} ${MY_DIR} ${RESOURCES})
+ 
+ ADD_DEFINITIONS(-DRESOURCES_INC)
++ADD_DEFINITIONS(-D_FORCE_INLINES)
+ ADD_LIBRARY(freenect2 ${SOURCES})
+ SET_TARGET_PROPERTIES(freenect2 PROPERTIES
+   CXX_VISIBILITY_PRESET hidden
+@@ -474,14 +502,6 @@
+   ENDIF()
+ ENDIF()
+ 
+-OPTION(BUILD_STREAMER_RECORDER "Build streamer_recorder" OFF)
+-SET(HAVE_streamer_recorder disabled)
+-IF(BUILD_STREAMER_RECORDER)
+-  SET(HAVE_streamer_recorder yes)
+-  MESSAGE(STATUS "Configurating streamer_recorder")
+-  ADD_SUBDIRECTORY(${MY_DIR}/tools/streamer_recorder)
+-ENDIF()
+-
+ GET_CMAKE_PROPERTY(vars VARIABLES)
+ MESSAGE(STATUS "Feature list:")
+ FOREACH(var ${vars})
+diff -x .git -Naur libfreenect2/src/JNILibfreenect2.cpp libfreenect2-patch/src/JNILibfreenect2.cpp
+--- libfreenect2/src/JNILibfreenect2.cpp	1970-01-01 00:00:00.000000000 +0000
++++ libfreenect2-patch/src/JNILibfreenect2.cpp	2018-04-14 10:03:26.670445713 +0000
+@@ -0,0 +1,430 @@
++//
++//  JNILibfreenect2.cpp
++//  JNILibfreenect2
++//
++//  Created by tom on 6/10/15.
++//  Copyright (c) 2015 Thomas Sanchez Lengeling. All rights reserved.
++//
++
++#include <stdio.h>
++#include <libfreenect2/rgb_packet_processor.h>
++#include <libfreenect2/async_packet_processor.h>
++
++#include <cstring>
++#include <fstream>
++#include <string>
++
++#include "JNILibfreenect2.h"
++
++namespace openKinect2 {
++    
++    void Device::sigint_handler(int s)
++    {
++        initialized_device = true;
++    }
++    
++    Device::Device()
++    {
++        initialized_device = false;
++        
++        //load memory
++        depthData       = (uint32_t *)malloc(FRAME_SIZE_DEPTH * sizeof(uint32_t));
++        irData          = (uint32_t *)malloc(FRAME_SIZE_DEPTH * sizeof(uint32_t));
++        colorData       = (uint32_t *)malloc(FRAME_SIZE_COLOR * sizeof(uint32_t));
++        undisortedData  = (uint32_t *)malloc(FRAME_SIZE_DEPTH * sizeof(uint32_t));
++        registeredData  = (uint32_t *)malloc(FRAME_SIZE_DEPTH * sizeof(uint32_t));
++        rawDepthData    = (uint32_t *)malloc(FRAME_SIZE_DEPTH * sizeof(uint32_t));
++        
++        //XYZ data, depth size times 3
++        depthCameraData = (float *)malloc(FRAME_SIZE_DEPTH * 3 * sizeof(float));
++        
++        mSerialKinect = "";
++        mNumDevices   = 0;
++        
++        //enables
++        enableDepth       = false;
++        enableVideo       = false;
++        enableIR          = false;
++        enableRegistered  = false;
++        
++        //toggles
++        toggleDepth      = false;
++        toggleVideo      = false;
++        toggleIR         = false;
++        toggleRegistered = false;
++        
++        enumerateDevices();
++    }
++    
++    void Device::enumerateDevices()
++    {
++        libfreenect2::Freenect2  libFreenect2;
++        
++        mNumDevices = libFreenect2.enumerateDevices();
++        if(mNumDevices == 0)
++        {
++             std::cerr << "No Device Connected!" << std::endl;
++        }else{
++            std::cout <<mNumDevices<<" Device Connected!" << std::endl;
++        }
++        
++    }
++    
++    //open the kinect
++    void Device::openKinect(int index)
++    {
++        if(mNumDevices == 0)
++        {
++            std::cerr << "Cannot Find Devices" << std::endl;
++            initialized_device = false;
++            return;
++        }
++        
++        if(!pipeline){
++            pipeline = new libfreenect2::OpenCLPacketPipeline();
++             initialized_device = true;
++        }else{
++            std::cerr << "OpenCL pipeline is not supported!" << std::endl;
++            initialized_device = false;
++            return;
++        }
++
++        if(pipeline)
++        {
++           
++            //open the kinect with a specific Serial number
++            std::cout<<"Devce: "<<index<<std::endl;
++            dev = freenect2.openDevice(index, pipeline);
++            initialized_device = true;
++            
++            if(dev == 0){
++                initialized_device = false;
++                std::cerr << "no device connected or failure opening the default one!" << std::endl;
++                return;
++            }
++        }
++        else
++        {
++            std::cerr << "failed to start openCL packet pipeline" << std::endl;
++            initialized_device = false;
++            return;
++        }
++        
++        if(initialized_device){
++            
++            //if enable registeres, video and depth  has to be activated
++            if(enableRegistered){
++                enableVideo = true;
++                enableDepth = true;
++                std::cout<<"Enable Kinect 2 Video + Depth Map"<<std::endl;
++            }
++            
++            if(enableVideo){
++                toggleVideo = true;
++                std::cout<<"Enable Kinect 2 Video"<<std::endl;
++            }
++            if(enableIR){
++                toggleIR = true;
++                std::cout<<"Enable Kinect 2 IR"<<std::endl;
++            }
++            
++            if(enableDepth){
++                toggleDepth = true;
++                std::cout<<"Enable Kinect 2 Depth"<<std::endl;
++            }
++            
++            int flags = 0;
++            flags |= enableVideo ? libfreenect2::Frame::Color : 0;
++            flags |= enableIR ? libfreenect2::Frame::Ir : 0;
++            flags |= enableDepth ? libfreenect2::Frame::Depth : 0;
++        
++            listener = new libfreenect2::SyncMultiFrameListener(flags);
++        
++            if(enableVideo){
++                dev->setColorFrameListener(listener);
++            }
++            
++            if(enableIR || enableDepth){
++                dev->setIrAndDepthFrameListener(listener);
++            }
++            
++            dev->start();
++        
++            std::cout << "Device Serial: " << dev->getSerialNumber() << std::endl;
++            std::cout << "Device Firmware: " << dev->getFirmwareVersion() << std::endl;
++            
++            if(enableRegistered){
++                registration = new libfreenect2::Registration(dev->getIrCameraParams(), dev->getColorCameraParams());
++                toggleRegistered = true;
++                
++                if(registration == NULL){
++                    std::cerr<<"error opening registered mapping process"<<std::endl;
++                    return;
++                }
++            }
++        }
++        
++        if(initialized_device){
++            mKinectThread = std::thread(&Device::updateKinect, this);
++        }else{
++            return;
++        }
++
++    }
++    
++    //close the kinect
++    void Device::closeKinect()
++    {
++        std::cout<<"closing Kinect v2 :"<<mSerialKinect<<std::endl;
++        if(initialized_device){
++            dev->stop();
++            dev->close();
++        
++            if( registration != NULL){
++                delete registration;
++            }
++        }
++        
++        if(depthData != NULL){
++            delete depthData;
++        }
++        
++        if(rawDepthData != NULL){
++            delete rawDepthData;
++        }
++        
++        if(irData != NULL){
++            delete  irData;
++        }
++        
++        if(colorData != NULL){
++            delete colorData;
++        }
++        
++        if(undisortedData != NULL){
++            delete undisortedData;
++        }
++        
++        if(registeredData != NULL){
++            delete registeredData;
++        }
++        
++        if(depthCameraData != NULL){
++            delete depthCameraData;
++        }
++    }
++    
++    //get number of devices
++    int Device::getDeviceCount()
++    {
++        return mNumDevices;
++    }
++    
++    //get the serial number from the kinect
++    std::string Device::getSerial(int index )
++    {
++        if(mNumDevices  > 0){
++            mSerialKinect = freenect2.getDeviceSerialNumber(index);
++        }
++        return mSerialKinect;
++    }
++    
++    //update the kinect
++    void Device::updateKinect()
++    {
++        libfreenect2::FrameMap frames;
++        
++
++        //Temporary arrays
++        float * newDepth = new float[FRAME_SIZE_DEPTH];
++        float * newIr    = new float[FRAME_SIZE_DEPTH];
++        float * newUndisorted =  new float[FRAME_SIZE_DEPTH];
++        
++        libfreenect2::Frame undistorted(512, 424, 4), registered(512, 424, 4);
++                                                                 
++        //MAIN THREAD
++        while(initialized_device){
++            listener->waitForNewFrame(frames);
++            
++            if(enableRegistered){
++                
++                libfreenect2::Frame *  rgb   = frames[libfreenect2::Frame::Color];
++                std::memcpy(colorData, reinterpret_cast<const uint32_t *>(rgb->data), 1920 * 1080 * 4);
++                
++                libfreenect2::Frame *  depth = frames[libfreenect2::Frame::Depth];
++                memcpy(newDepth, reinterpret_cast<const float * >(depth->data), FRAME_BYTE_SIZE_DEPTH);
++                
++                 //Mappers RGB + Depth
++                registration->apply(rgb, depth, &undistorted, &registered);
++                memcpy(newUndisorted, reinterpret_cast<const float * >(undistorted.data), FRAME_BYTE_SIZE_DEPTH);
++                memcpy(registeredData, reinterpret_cast<const uint32_t * >(registered.data), FRAME_BYTE_SIZE_DEPTH);
++            }else if(enableVideo && !enableDepth){
++                
++                libfreenect2::Frame *  rgb   = frames[libfreenect2::Frame::Color];
++                memcpy(colorData, reinterpret_cast<const uint32_t *>(rgb->data), 1920 * 1080 * 4);
++            }else if( !enableVideo && enableDepth ){
++                
++                libfreenect2::Frame *  depth = frames[libfreenect2::Frame::Depth];
++                memcpy(newDepth, reinterpret_cast<const float * >(depth->data), FRAME_BYTE_SIZE_DEPTH);
++            }else if(enableVideo && enableDepth && !enableRegistered){
++                
++                libfreenect2::Frame *  rgb   = frames[libfreenect2::Frame::Color];
++                memcpy(colorData, reinterpret_cast<const uint32_t *>(rgb->data), 1920 * 1080 * 4);
++                
++                libfreenect2::Frame *  depth = frames[libfreenect2::Frame::Depth];
++                memcpy(newDepth, reinterpret_cast<const float * >(depth->data), FRAME_BYTE_SIZE_DEPTH);
++            }
++        
++
++            if(enableIR){
++                libfreenect2::Frame *  ir    = frames[libfreenect2::Frame::Ir];
++                memcpy(newIr, reinterpret_cast<const float * >(ir->data), FRAME_BYTE_SIZE_DEPTH);
++            }
++       
++                int indexFD = 0;
++                int pIndexEnd = (FRAME_SIZE_DEPTH);
++                
++                int indexX = 0;
++                int indexY = 0;
++                int cameraXYZ = 0;
++                while(indexFD < pIndexEnd){
++                    float depth = newDepth[indexFD];
++                    
++                    //Depth
++                    //0.0566666f -> (value/45000)* 255
++                    rawDepthData[indexFD] = uint32_t(depth);
++                   
++                    //IR
++                    irData[indexFD]  = colorByte2Int((uint32_t(newIr[indexFD]*0.0566666f)>>2));
++      
++                    //undisorted
++                    undisortedData[indexFD]  = colorByte2Int(uint32_t(newUndisorted[indexFD]*0.0566666f));
++                    
++                    
++                    depthData[indexFD]  = colorByte2Int(uint32_t(depth*0.0566666f));
++                    
++                    //evaluates the depth XYZ position;
++                   
++                    depthCameraData[cameraXYZ++] = (indexX - dev->getIrCameraParams().cx) * depth / dev->getIrCameraParams().fx;//x
++                    depthCameraData[cameraXYZ++] = (indexY - dev->getIrCameraParams().cy) * depth / dev->getIrCameraParams().fy; //y
++                    depthCameraData[cameraXYZ++] = depth; //z
++                    
++                    indexX++;
++                    if(indexX >= 512){ indexX=0; indexY++;}
++
++                    indexFD++;
++              //  }
++            }
++            
++            
++            //framw listener
++            listener->release(frames);
++        }
++        
++        //clean up
++        if(newDepth != NULL) delete newDepth;
++        if(newIr != NULL) delete newIr;
++        if(newUndisorted != NULL) delete newUndisorted;
++        
++    }
++    
++    bool Device::isKinectReady()
++    {
++        return  initialized_device;
++    }
++    
++    //------JNI functions
++    //depth
++    uint32_t * Device::JNI_GetDepth()
++    {
++        return depthData;
++    }
++    
++    //Raw Depth
++    uint32_t * Device::JNI_GetRawDepth()
++    {
++        return rawDepthData;
++    }
++    
++    uint32_t *  Device::JNI_GetColor()
++    {
++        return colorData;
++    }
++    
++    uint32_t *  Device::JNI_GetIr()
++    {
++        return irData;
++    }
++    
++    uint32_t *  Device::JNI_GetUndistorted()
++    {
++        return undisortedData;
++    }
++    
++    uint32_t *  Device::JNI_GetRegistered()
++    {
++        return registeredData;
++    }
++    
++    float * Device::JNI_GetDepthCameraPositions()
++    {
++        return depthCameraData;
++    }
++    
++           
++    //----HELP functions-----
++    //return float pointer with x, y, and z values
++    float  *   Device::depthToCameraSpace(int & x, int & y, float & depth)
++    {
++        float * point  = new float[3];
++        point[2] = (depth); // z, convert from mm to meters
++        point[0] = (x - dev->getIrCameraParams().cx) * point[2] / dev->getIrCameraParams().fx; //x
++        point[1] = (y - dev->getIrCameraParams().cy) * point[2] / dev->getIrCameraParams().fy; //y
++        return point;
++    }
++    
++    float Device::clamp(float value, float min, float max)
++    {
++        return value < min ? min : value > max ? max : value;
++    }
++    
++    float Device::lmap(float value, float inputMin, float inputMax, float outputMin, float outputMax, bool clamp)
++    {
++        
++        if (fabs(inputMin - inputMax) < FLT_EPSILON){
++            return outputMin;
++        } else {
++            float outVal = ((value - inputMin) / (inputMax - inputMin) * (outputMax - outputMin) + outputMin);
++            
++            if( clamp ){
++                if(outputMax < outputMin){
++                    if( outVal < outputMax )outVal = outputMax;
++                    else if( outVal > outputMin )outVal = outputMin;
++                }else{
++                    if( outVal > outputMax )outVal = outputMax;
++                    else if( outVal < outputMin )outVal = outputMin;
++                }
++            }
++            return outVal;
++        }
++    }
++    
++    uint32_t Device::colorByte2Int(uint32_t gray)
++    {
++        gray = gray & 0xffff;
++        return 0xff000000 | (gray << 16) | (gray << 8) | gray;
++    }
++    
++    
++    uint32_t Device::colorByte2Int(uint8_t r, uint8_t g, uint8_t b)
++    {
++         return 0xff000000  | (r << 16) | (g << 8) | b;
++    }
++    
++    uint32_t Device::colorByte2Int(uint8_t r, uint8_t g, uint8_t b, uint8_t  a)
++    {
++        return a << 24 | (r << 16) | (g << 8) | b;
++    }
++    
++
++}
+diff -x .git -Naur libfreenect2/src/JNILibfreenect2.h libfreenect2-patch/src/JNILibfreenect2.h
+--- libfreenect2/src/JNILibfreenect2.h	1970-01-01 00:00:00.000000000 +0000
++++ libfreenect2-patch/src/JNILibfreenect2.h	2018-04-14 10:03:26.670445713 +0000
+@@ -0,0 +1,171 @@
++/*
++ *  JNILibfreenect2.h
++ *  JNILibfreenect2
++ *
++ *  Created by tom on 6/7/15.
++ *  Copyright (c) 2015 Thomas Sanchez Lengeling. All rights reserved.
++ *
++ */
++
++#ifndef JNI_LIB_FREENECT2_H_
++#define JNI_LIB_FREENECT2_H_
++
++#include <iostream>
++#include <thread>
++#include <mutex>
++#include <cmath>
++
++#include <algorithm>
++
++#include <iostream>
++#include <signal.h>
++
++#include <libfreenect2/libfreenect2.hpp>
++#include <libfreenect2/frame_listener_impl.h>
++#include <libfreenect2/threading.h>
++#include <libfreenect2/registration.h>
++#include <libfreenect2/packet_pipeline.h>
++
++
++/* The classes below are exported */
++#pragma GCC visibility push(default)
++
++
++#define FRAME_SIZE_DEPTH            217088      //512 x 424
++#define FRAME_BYTE_SIZE_DEPTH       868352      //512 x 424 x 4
++
++#define FRAME_SIZE_COLOR    2073600
++#define FLT_EPSILON         1.19209290e-07F
++
++
++namespace  openKinect2{
++    
++    class Device
++    {
++    public:
++        Device();
++        
++        
++        //open a Device from a specific Serial Number
++        void        openKinect(int index = 0);
++        
++        void        enumerateDevices();
++        
++        void        updateKinect();
++        
++        void        setupDepth();
++        
++        void        closeKinect();
++        
++        void        sigint_handler(int s);
++        
++        bool        isKinectReady();
++        
++        int         getDeviceCount();
++        
++        std::string getSerial(int index = 0);
++        
++        
++        //get Depth Frame
++        uint32_t *	JNI_GetDepth();
++        
++        //get color RGB  frame
++        uint32_t *  JNI_GetColor();
++        
++        // get the IR frame
++        uint32_t *  JNI_GetIr();
++        
++        //get the depth undistorted for the depth mapping
++        uint32_t *  JNI_GetUndistorted();
++        
++        //get depth + rgb map
++        uint32_t *  JNI_GetRegistered();
++        
++        //get raw depth data
++        uint32_t *  JNI_GetRawDepth();
++        
++        float    *  JNI_GetDepthCameraPositions();
++        
++        void        JNI_printCameraValues();
++        
++        //JNI enables
++        void        JNI_enableVideo(bool enable = true){enableVideo = enable;}
++        void        JNI_enableDepth(bool enable = true){enableDepth = enable;}
++        void        JNI_enableIR(bool enable = true){enableIR = enable;}
++        void        JNI_enableRegistered(bool enable = true){enableRegistered = enable;}
++        
++        //toggle
++        void        JNI_toggleVideo(bool enable = true){toggleVideo = enable;}
++        void        JNI_toggleDepth(bool enable = true){toggleDepth = enable;}
++        void        JNI_toggleIR(bool enable = true){toggleIR = enable;}
++        void        JNI_toggleRegistered(bool enable = true){toggleRegistered = enable;}
++        
++    private:
++        
++        float       clamp(float value, float min, float max);
++        float       lmap(float value, float inputMin, float inputMax, float outputMin, float outputMax, bool clamp);
++        
++        //help function to map to processing color format
++        uint32_t colorByte2Int(uint32_t gray);
++        uint32_t colorByte2Int(uint8_t gray, uint8_t alpha);
++        uint32_t colorByte2Int(uint8_t r, uint8_t g, uint8_t b, uint8_t  a);
++        uint32_t colorByte2Int(uint8_t r, uint8_t g, uint8_t b);
++        
++        //converssion based on
++        // https://github.com/OpenKinect/libfreenect2/issues/41
++        //return float pointer with x, y, and z values
++        float  *     depthToCameraSpace(int & x, int & y, float & depth);
++        
++        
++    private:
++    
++        //libfreenect
++        libfreenect2::Freenect2                  freenect2;
++        libfreenect2::SyncMultiFrameListener *   listener = 0;
++        libfreenect2::Freenect2Device *          dev = 0;
++        libfreenect2::PacketPipeline  *          pipeline = 0;
++        libfreenect2::Registration    *          registration = 0;
++        
++        //Main thread
++        std::thread                 mKinectThread;
++        
++        //initilized
++        bool                        initialized_device;
++        
++        //Data
++        uint32_t *	 depthData;
++        uint32_t *   rawDepthData;
++        uint32_t *	 colorData;
++        uint32_t *	 irData;
++        uint32_t *   undisortedData;
++        uint32_t *   registeredData;
++        
++        float    *   depthCameraData;
++        
++        
++        //Enables
++        bool         enableDepth;
++        bool         enableVideo;
++        bool         enableIR;
++        bool         enableRegistered;
++        
++        //toggles
++        bool         toggleDepth;
++        bool         toggleVideo;
++        bool         toggleIR;
++        bool         toggleRegistered;
++        
++        
++        //for multiples Kinects
++        std::string     mSerialKinect;
++        
++        int             mNumDevices;
++        
++    
++    };
++
++}
++#pragma GCC visibility pop
++#endif
++
++
+diff -x .git -Naur libfreenect2/src/org_openkinect_freenect2_Device.cpp libfreenect2-patch/src/org_openkinect_freenect2_Device.cpp
+--- libfreenect2/src/org_openkinect_freenect2_Device.cpp	1970-01-01 00:00:00.000000000 +0000
++++ libfreenect2-patch/src/org_openkinect_freenect2_Device.cpp	2018-04-14 10:03:26.670445713 +0000
+@@ -0,0 +1,293 @@
++#include "org_openkinect_freenect2_Device.h"
++#include "JNILibfreenect2.h"
++#include <iostream>
++
++
++JNIEXPORT jlong JNICALL Java_org_openkinect_freenect2_Device_jniInit(JNIEnv* env, jobject obj)
++{
++    std::cout<<"Init Kinect2 "<<std::endl;
++    
++    openKinect2::Device * kinect = new openKinect2::Device();
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fieldID = env->GetFieldID(cls, "ptr", "J");
++    env->SetLongField(obj, fieldID, (jlong)kinect);
++    jlong ptr = env->GetLongField(obj, fieldID);
++    return (jlong) ptr;
++}
++
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniOpen(JNIEnv* env, jobject obj)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    kinect->openKinect(); //1
++    env->DeleteLocalRef(cls);
++}
++
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniOpenM(JNIEnv* env, jobject obj, jint index)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    kinect->openKinect((int)index);
++    env->DeleteLocalRef(cls);
++}
++
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniStop(JNIEnv* env, jobject obj)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    kinect->closeKinect();
++    
++    //clean up the class pointer
++    env->DeleteLocalRef( cls );
++    env->SetLongField( obj, fid, -1 );
++    env->DeleteGlobalRef( obj );
++}
++
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniEumerateDevices(JNIEnv* env, jobject obj)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    kinect->enumerateDevices();
++    env->DeleteLocalRef(cls);
++}
++
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniOpenSerial(JNIEnv *env, jobject obj, jint index)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    kinect->openKinect((int)index); //1
++    env->DeleteLocalRef(cls);
++}
++
++JNIEXPORT jint JNICALL Java_org_openkinect_freenect2_Device_jniGetNumDevices(JNIEnv * env, jobject obj)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    return kinect->getDeviceCount();
++}
++
++JNIEXPORT jstring JNICALL Java_org_openkinect_freenect2_Device_jniGetSerialDevice(JNIEnv * env , jobject obj, jint index)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    return env->NewStringUTF(kinect->getSerial(index).c_str());
++}
++
++/// ------ get Depth data
++JNIEXPORT jintArray JNICALL Java_org_openkinect_freenect2_Device_jniGetDepthData(JNIEnv * env, jobject obj)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    jintArray buffer = env->NewIntArray((jsize)FRAME_SIZE_DEPTH);
++    
++    const jint * pInt;
++    if(kinect->isKinectReady()){
++        pInt = (const jint * )kinect->JNI_GetDepth();
++        env->SetIntArrayRegion(buffer, 0, (jsize)FRAME_SIZE_DEPTH, (const jint *)(pInt));
++    }
++
++    return buffer;
++}
++
++JNIEXPORT jintArray JNICALL Java_org_openkinect_freenect2_Device_jniGetRawDepthData(JNIEnv * env, jobject obj)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    jintArray buffer = env->NewIntArray((jsize)FRAME_SIZE_DEPTH);
++    
++    const jint * pInt;
++    if(kinect->isKinectReady()){
++        pInt = (const jint * )kinect->JNI_GetRawDepth();
++        env->SetIntArrayRegion(buffer, 0, (jsize)FRAME_SIZE_DEPTH, (const jint *)(pInt));
++    }
++    
++    return buffer;
++}
++/// ------  get Ir data
++JNIEXPORT jintArray JNICALL Java_org_openkinect_freenect2_Device_jniGetIrData(JNIEnv * env, jobject obj)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    jintArray buffer = env->NewIntArray((jsize)FRAME_SIZE_DEPTH);
++    
++    const jint * pInt;
++    if(kinect->isKinectReady()){
++        pInt = (const jint * )kinect->JNI_GetIr();
++        env->SetIntArrayRegion(buffer, 0, (jsize)FRAME_SIZE_DEPTH, (const jint *)(pInt));
++    }
++    
++    return buffer;
++}
++
++/// ------  get Color data
++JNIEXPORT jintArray JNICALL Java_org_openkinect_freenect2_Device_jniGetColorData(JNIEnv * env, jobject obj)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    jintArray buffer = env->NewIntArray((jsize)FRAME_SIZE_COLOR);
++    
++    const jint * pInt;
++    if(kinect->isKinectReady()){
++        pInt = (const jint * )kinect->JNI_GetColor();
++        env->SetIntArrayRegion(buffer, 0, (jsize)FRAME_SIZE_COLOR, (const jint *)(pInt));
++    }
++    
++    return buffer;
++}
++
++/*
++ * Class:     org_openkinect_freenect2_Device
++ * Method:    jniGetDepthData
++ * Signature: ()[I
++ */
++JNIEXPORT jintArray JNICALL Java_org_openkinect_freenect2_Device_jniGetUndistorted(JNIEnv * env, jobject obj)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    jintArray buffer = env->NewIntArray((jsize)FRAME_SIZE_DEPTH);
++    
++    const jint * pInt;
++    if(kinect->isKinectReady()){
++        pInt = (const jint * )kinect->JNI_GetUndistorted();
++        env->SetIntArrayRegion(buffer, 0, (jsize)FRAME_SIZE_DEPTH, (const jint *)(pInt));
++    }
++    
++    return buffer;
++}
++
++JNIEXPORT jintArray JNICALL Java_org_openkinect_freenect2_Device_jniGetRegistered(JNIEnv * env, jobject obj)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    jintArray buffer = env->NewIntArray((jsize)FRAME_SIZE_DEPTH);
++    
++    const jint * pInt;
++    if(kinect->isKinectReady()){
++        pInt = (const jint * )kinect->JNI_GetRegistered();
++        env->SetIntArrayRegion(buffer, 0, (jsize)FRAME_SIZE_DEPTH, (const jint *)(pInt));
++    }
++    
++    return buffer;
++}
++
++JNIEXPORT jfloatArray JNICALL Java_org_openkinect_freenect2_Device_jniGetDepthCameraPositions
++(JNIEnv * env, jobject obj)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    jfloatArray buffer = env->NewFloatArray((jsize)FRAME_SIZE_DEPTH * 3);
++    
++    const jfloat * pFloat;
++    if(kinect->isKinectReady()){
++        pFloat = (const jfloat * )kinect->JNI_GetDepthCameraPositions();
++        env->SetFloatArrayRegion(buffer, 0, (jsize)FRAME_SIZE_DEPTH * 3, (const jfloat *)(pFloat));
++    }
++    
++    return buffer;
++}
++
++
++//----enable
++
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniEnableVideo
++(JNIEnv * env , jobject obj, jboolean enable)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    kinect->JNI_enableVideo(bool(enable));
++    env->DeleteLocalRef(cls);
++}
++
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniEnableDepth
++(JNIEnv * env , jobject obj, jboolean enable)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    kinect->JNI_enableDepth(bool(enable));
++    env->DeleteLocalRef(cls);
++}
++
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniEnableIR
++(JNIEnv * env , jobject obj, jboolean enable)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    kinect->JNI_enableIR(bool(enable));
++    env->DeleteLocalRef(cls);
++}
++
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniEnableRegistered
++(JNIEnv * env , jobject obj, jboolean enable)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    kinect->JNI_enableRegistered(bool(enable));
++    env->DeleteLocalRef(cls);
++}
++
++//-----toggle
++
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniToggleVideo
++(JNIEnv * env , jobject obj, jboolean toggle)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    kinect->JNI_toggleVideo(bool(toggle));
++    env->DeleteLocalRef(cls);
++}
++
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniToggleDepth
++(JNIEnv * env , jobject obj, jboolean toggle)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    kinect->JNI_toggleDepth(bool(toggle));
++    env->DeleteLocalRef(cls);
++}
++
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniToggleIR
++(JNIEnv * env , jobject obj, jboolean toggle)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    kinect->JNI_toggleIR(bool(toggle));
++    env->DeleteLocalRef(cls);
++}
++
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniToggleRegistered
++(JNIEnv * env , jobject obj, jboolean toggle)
++{
++    jclass cls = env->GetObjectClass(obj);
++    jfieldID fid = env->GetFieldID(cls, "ptr", "J");
++    openKinect2::Device * kinect = (openKinect2::Device *) env->GetLongField(obj, fid);
++    kinect->JNI_toggleRegistered(bool(toggle));
++    env->DeleteLocalRef(cls);
++}
+diff -x .git -Naur libfreenect2/src/org_openkinect_freenect2_Device.h libfreenect2-patch/src/org_openkinect_freenect2_Device.h
+--- libfreenect2/src/org_openkinect_freenect2_Device.h	1970-01-01 00:00:00.000000000 +0000
++++ libfreenect2-patch/src/org_openkinect_freenect2_Device.h	2018-04-14 10:03:26.670445713 +0000
+@@ -0,0 +1,166 @@
++/* DO NOT EDIT THIS FILE - it is machine generated */
++#include <jni.h>
++/* Header for class org_openkinect_freenect2_Device */
++
++#ifndef _Included_org_openkinect_freenect2_Device
++#define _Included_org_openkinect_freenect2_Device
++#ifdef __cplusplus
++extern "C" {
++#endif
++/*
++ * Class:     org_openkinect_freenect2_Device
++ * Method:    initJNI
++ * Signature: ()J
++ */
++JNIEXPORT jlong JNICALL Java_org_openkinect_freenect2_Device_jniInit
++  (JNIEnv *, jobject);
++
++/*
++ * Class:     org_openkinect_freenect2_Device
++ * Method:    openJNI
++ * Signature: ()V
++ */
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniOpen
++  (JNIEnv *, jobject);
++    
++/*
++ * Class:     openv2_Device
++ * Method:    openJNI
++ * Signature: ()V
++ */
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniOpenM
++(JNIEnv *, jobject, jint index);
++    
++/*
++ * Class:     org_openkinect_freenect2_Device
++ * Method:    stopJNI
++ * Signature: ()V
++ */
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniStop
++(JNIEnv *, jobject);
++    
++/*
++ * Class:     org_openkinect_freenect2_Device
++ * Method:    stopJNI
++ * Signature: ()V
++ */
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniEumerateDevices
++(JNIEnv *, jobject);
++
++/*
++ * Class:     org_openkinect_freenect2_Device
++ * Method:    openJNI
++ * Signature: ()V
++ */
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniOpenSerial
++(JNIEnv *, jobject, jint );
++    
++    
++/*
++ * Class:     org_openkinect_freenect2_Device
++ * Method:    etNumDevices
++ * Signature: ()V
++ */
++JNIEXPORT jint JNICALL Java_org_openkinect_freenect2_Device_jniGetNumDevices
++    (JNIEnv *, jobject);
++    
++    
++/*
++ * Class:     org_openkinect_freenect2_Device
++ * Method:    etNumDevices
++ * Signature: ()V
++ */
++JNIEXPORT jstring JNICALL Java_org_openkinect_freenect2_Device_jniGetSerialDevice
++(JNIEnv *, jobject, jint );
++    
++
++/*
++ * Class:     org_openkinect_freenect2_Device
++ * Method:    jniGetDepthData
++ * Signature: ()[I
++ */
++JNIEXPORT jintArray JNICALL Java_org_openkinect_freenect2_Device_jniGetDepthData
++  (JNIEnv *, jobject);
++    
++/*
++ * Class:     org_openkinect_freenect2_Device
++ * Method:    jniGetDepthData
++ * Signature: ()[I
++ */
++    
++JNIEXPORT jintArray JNICALL Java_org_openkinect_freenect2_Device_jniGetRawDepthData
++(JNIEnv *, jobject);
++    
++    
++/*
++ * Class:     org_openkinect_freenect2_Device
++ * Method:    jniGetDepthData
++ * Signature: ()[I
++ */
++JNIEXPORT jintArray JNICALL Java_org_openkinect_freenect2_Device_jniGetIrData
++(JNIEnv *, jobject);
++
++/*
++ * Class:     org_openkinect_freenect2_Device
++ * Method:    jniGetDepthData
++ * Signature: ()[I
++ */
++JNIEXPORT jintArray JNICALL Java_org_openkinect_freenect2_Device_jniGetColorData
++(JNIEnv *, jobject);
++    
++/*
++ * Class:     org_openkinect_freenect2_Device
++ * Method:    jniGetDepthData
++ * Signature: ()[I
++ */
++JNIEXPORT jintArray JNICALL Java_org_openkinect_freenect2_Device_jniGetUndistorted
++(JNIEnv *, jobject);
++    
++/*
++ * Class:     org_openkinect_freenect2_Device
++ * Method:    jniGetDepthData
++ * Signature: ()[I
++ */
++JNIEXPORT jfloatArray JNICALL Java_org_openkinect_freenect2_Device_jniGetDepthCameraPositions
++(JNIEnv *, jobject);
++
++
++/*
++ * Class:     org_openkinect_freenect2_Device
++ * Method:    jniGetDepthData
++ * Signature: ()[I
++ */
++JNIEXPORT jintArray JNICALL Java_org_openkinect_freenect2_Device_jniGetRegistered
++(JNIEnv *, jobject);
++    
++//enable
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniEnableVideo
++(JNIEnv *, jobject, jboolean);
++
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniEnableDepth
++(JNIEnv *, jobject, jboolean);
++
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniEnableIR
++(JNIEnv *, jobject, jboolean);
++
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniEnableRegistered
++(JNIEnv *, jobject, jboolean);
++    
++//toggle
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniToggleVideo
++(JNIEnv *, jobject, jboolean);
++
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniToggleDepth
++(JNIEnv *, jobject, jboolean);
++
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniToggleIR
++(JNIEnv *, jobject, jboolean);
++
++JNIEXPORT void JNICALL Java_org_openkinect_freenect2_Device_jniToggleRegistered
++(JNIEnv *, jobject, jboolean);
++    
++
++#ifdef __cplusplus
++}
++#endif
++#endif

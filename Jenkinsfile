@@ -10,9 +10,21 @@ node {
     app = docker.build("superboum/processing-kinect")
   }
 
+  stage('Build libfreenect2 library') {
+      withEnv(["HOME=${ pwd() }"]) {
+        sh 'cp -r /opt/libfreenect2 ~'
+        sh 'cd libfreenect2 && patch -p1 ../patch/libfreenect2/01-add-jni-support.patch'
+        sh 'cd libfreenect2 && patch -p1 ../patch/libfreenect2/02-add-opencl-device-choice.patch'
+        sh 'mkdir -p ~/build-freenect2'
+        sh 'cd ~/build-freenect2 && cmake ~/libfreenect2 && make'
+        sh 'cp ~/build-freenect2/lib/libfreenect2.so ~'
+        archiveArtifacts artifacts: 'libfreenect2.so'
+      }
+  }
+
   stage('Build Java Library') {
     app.inside {
-      withEnv(["HOME=${ pwd() }"]) { 
+      withEnv(["HOME=${ pwd() }"]) {
         sh 'cp -r /opt/OpenKinect-for-Processing/OpenKinect-Processing ~'
         sh 'cp -r /opt/processing-3.3.7 ~'
         sh 'mkdir -p ~/sketchbook/libraries/'
