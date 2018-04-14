@@ -1,0 +1,28 @@
+--- OpenKinect-for-Processing/OpenKinect-Processing/src/org/openkinect/freenect2/Device.java	2018-04-14 12:17:14.000000000 +0000
++++ OpenKinect-for-Processing-patch/OpenKinect-Processing/src/org/openkinect/freenect2/Device.java	2018-04-14 15:23:26.104568465 +0000
+@@ -179,7 +179,15 @@
+     public void initDevice(int index){
+     	jniOpenM(index);
+     }
+-    
++ 
++    /**
++     * Open and initialize a specific Device index [0, numDevices - 1] and OpenCL device index
++     * @param index
++     * @param clIndex
++     */
++    public void initDevice(int index, int clIndex){
++    	jniOpenN(index, clIndex);
++    }   
+     
+     /**
+      * Close Device
+@@ -381,6 +389,7 @@
+     private  native long 	jniInit();
+     private  native void 	jniOpen();
+     private  native void 	jniOpenM(int index);
++    private  native void 	jniOpenN(int index, int clIndex);
+     private  native void 	jniStop();
+     private  native void 	jniEumerateDevices();
+     
+
