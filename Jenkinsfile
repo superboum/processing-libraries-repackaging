@@ -10,7 +10,7 @@ node {
     app = docker.build("superboum/processing-kinect")
   }
 
-  stage('Build project') {
+  stage('Build Java Library') {
     app.inside {
       withEnv(["HOME=${ pwd() }"]) { 
         sh 'mv /opt/OpenKinect-for-Processing/OpenKinect-Processing ~'
