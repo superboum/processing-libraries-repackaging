@@ -1,4 +1,4 @@
-FROM fedora:latest
+FROM fedora:27
 LABEL maintainer "quentin@dufour.io"
 
 RUN echo "fastestmirror=1" >> /etc/dnf/dnf.conf \
